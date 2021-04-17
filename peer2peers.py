@@ -5,8 +5,8 @@ import binascii
 import json
 from torrent_utils import *
 from PyInquirer import prompt, print_json
-from ip2geotools.databases.noncommercial import DbIpCity
-from geoip import geolite2
+#from ip2geotools.databases.noncommercial import DbIpCity
+#from geoip import geolite2
 
 """
 def url_encode_all_chars(s):
@@ -27,7 +27,7 @@ if __name__ == "__main__" :
 	
 	#torrent_file = "xubuntu-20.04.1-desktop-amd64.iso.torrent"
 	#torrent_file = "volumes-136ffddd0959108becb2b3a86630bec049fcb0ff.torrent"
-	t = Torrent("ubuntu-20.04.1-desktop-amd64.iso.torrent")
+	t = Torrent("ubuntu-20.04.2.0-desktop-amd64.iso.torrent")
 	# root keys = ['announce', 'comment', 'created by', 'creation date', 'info', 'info_hash']
 
 	"""
