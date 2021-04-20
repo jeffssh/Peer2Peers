@@ -3,6 +3,7 @@ import requests
 import os
 import binascii
 import json
+import time
 from torrent_utils import *
 from PyInquirer import prompt, print_json
 #from ip2geotools.databases.noncommercial import DbIpCity
@@ -27,9 +28,10 @@ if __name__ == "__main__" :
 	
 	#torrent_file = "xubuntu-20.04.1-desktop-amd64.iso.torrent"
 	#torrent_file = "volumes-136ffddd0959108becb2b3a86630bec049fcb0ff.torrent"
+	# TODO change to input first arg
 	t = Torrent("ubuntu-20.04.2.0-desktop-amd64.iso.torrent")
 	# root keys = ['announce', 'comment', 'created by', 'creation date', 'info', 'info_hash']
-
+	print("Torrent Loaded")
 	"""
 	{
 		"announce": "https://torrent.ubuntu.com/announce", 
@@ -101,8 +103,12 @@ if __name__ == "__main__" :
 	#print(ip_info)
 	connection_info = f"Peer {p['ip']}:{p['port']} is in {ip_info['city']}, {ip_info['state']}, {ip_info['country_name']} at {ip_info['latitude']}, {ip_info['longitude']}"
 	print(connection_info)
-	c = Connection(t.info_hash,t.peer_id,p['ip'],p['port'])
+	print(t)
+	c = Connection(t ,p['ip'],p['port'])
 	c.do_handshake()
+	time.sleep(10)
+	print("calling download file")
+	c.download_file()
 	#exit()
 
 	# we will connect to a single peer and download all pieces.
