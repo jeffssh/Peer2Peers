@@ -70,7 +70,7 @@ def _dechunk(chunks):
 		return line
 	else:
 		print(item)
-		raise "Invalid input!"
+		raise Exception("Invalid input!")
 
 
 class Torrent:
@@ -207,7 +207,7 @@ class Torrent:
 				line += chr(chunks.pop())
 			return line
 		else:
-			raise "Invalid input!"
+			raise Exception("Invalid input!")
 
 
 	def __parse_peers(self, peers):
@@ -241,7 +241,7 @@ class Torrent:
 				peers_list.append({'ip':ip,'port':port})
 			return peers_list
 
-		raise "Couldn't decode peers"
+		raise Exception("Couldn't decode peers")
 
 	
 class Connection:
@@ -289,7 +289,7 @@ class Connection:
 				print("Connection to peer was closed")
 				self.s.close()
 				# fatal. For demo tool, os._exit() is fine
-				os._exit()
+				os._exit(1)
 		return message
 
 	def __send_full(self, message):
@@ -304,7 +304,7 @@ class Connection:
 				self.s.close()
 				self.send_lock.release()
 				# fatal. For demo tool, os._exit() is fine
-				os._exit()
+				os._exit(1)
 		self.send_lock.release()
 		return sent == len(message)
 
@@ -414,7 +414,7 @@ class Connection:
 			self.s.close()
 			print("Connection to peer was closed")
 			# fatal. For demo tool, os._exit() is fine
-			os._exit()
+			os._exit(1)
 
 
 
@@ -502,6 +502,7 @@ class Connection:
 					# no more shards that can be downloaded.
 					# either we're finished, or this peer can't
 					# give us the whole file now
+					break
 				else:
 					message = b"\x06"
 					message += struct.pack(">I", shard["index"])
@@ -616,19 +617,18 @@ class Connection:
 			self.__send_full(m)
 			r_size = self.__recv_full(1)
 			if(len(r_size) == 0):
-				print(f"Couldn't handshake with {self.ip}:{self.port}, connection reset")
-				return
+				raise Exception((f"Couldn't handshake with {self.ip}:{self.port}, connection reset")
 			r_size = ord(r_size)
 			protocol = self.__recv_full(r_size)
 			if r_size != len(self.pstr) or protocol != self.pstr:
-				raise f"Unexpected protocol: '{protocol}' len: {self.pstr}"
+				raise Exception(f"Unexpected protocol: '{protocol}' len: {self.pstr}")
 			self.p_reserved = self.__recv_full(len(reserved))		
 			self.p_info_hash = self.__recv_full(len(self.info_hash))
 			self.p_peer_id = self.__recv_full(len(self.peer_id))
 			if self.p_info_hash != self.info_hash:
-				raise "Client and Peer info_hash mismatch"
+				raise Exception("Client and Peer info_hash mismatch")
 		except Exception as e:
-			print("Handshake failed: ", e)
+			raise Exception("Handshake failed")
 			return
 
 		print(f"Handshake complete with {self.p_peer_id}: {self.ip}:{self.port}")
