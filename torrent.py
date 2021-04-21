@@ -34,9 +34,10 @@ class Torrent:
 		self.peer_id = b"Peer2Peers" + os.urandom(10)
 		self.__load_torrent_file(torrent_file)
 		self.info_hash = self.torrent['info_hash']
-		self.length = self.torrent['info']['length']
 		self.piece_length = self.torrent['info']['piece length']
 		self.__load_piece_hashes(self.torrent['info']['pieces'])
+		self.length = self.torrent['info']['length']
+
 		self.__get_peers()
 
 	def __str__(self):
@@ -57,11 +58,15 @@ class Torrent:
 		"""
 		s  = f"Torrent file: {self.torrent_file}\n"
 		s += f"announce: {self.torrent['announce']}\n"
-		s += f"comment: {self.torrent['comment']}\n"
-		s += f"created by: {self.torrent['created by']}\n"
-		s += f"creation date: {self.torrent['creation date']}\n"
-		s += f"name: {self.torrent['info']['name']}\n"
-		s += f"length: {self.torrent['info']['length']}\n"
+		if 'comment' in self.torrent: 
+			s += f"comment: {self.torrent['comment']}\n"
+		if 'created by' in self.torrent: 
+			s += f"created by: {self.torrent['created by']}\n"
+		if 'creation date' in self.torrent: 
+			s += f"creation date: {self.torrent['creation date']}\n"
+		if 'name' in self.torrent: 
+			s += f"name: {self.torrent['info']['name']}\n"
+		s += f"length: {self.length}\n"
 		s += f"number of pieces: {len(self.piece_hashes)}\n"
 		s += f"piece length: {self.torrent['info']['piece length']}\n"
 		s += f"info hash: {binascii.hexlify(self.torrent['info_hash']).decode('utf-8')}"
@@ -141,7 +146,7 @@ class Torrent:
 			"port": 6881, # 6881-6889 are common ports for torrenting
 			"uploaded": "0",
 			"downloaded": "0",
-			"left": self.torrent['info']['length'],
+			"left": self.length,
 			"compact": 1,
 			"no_peer_id": 0,
 			"event": "started", # stopped, completed

@@ -240,12 +240,13 @@ class Connection:
 			# If we've downloaded all the pieces, the peer owns the file
 			# if not, they can't serve the whole file to us at this moment.
 			# for a proof of concept tool, os._kill is fine
+			print("bitfield count", self.bitfield.count(True), "piece_hashes length", len(self.piece_hashes), "equal?", self.bitfield.count(True) == len(self.piece_hashes))
 			if self.bitfield.count(True) == len(self.piece_hashes):
 				print("[+] This peer owns the whole file!")
-				os._kill(0)
+				#os._kill(0)
 			else:
 				print("[-] Peer couldn't serve whole file")
-				os._kill(0)
+				#os._kill(0)
 
 
 	def __recv_loop(self):
@@ -264,6 +265,8 @@ class Connection:
 				elif message_id == 1:
 					# unchoke
 					self.peer_choking = False
+					if self.outstanding_shards == 0:
+						print(f"[*] Sending initial {self.outstanding_shards_max} shard requests")
 					while self.outstanding_shards < self.outstanding_shards_max:
 						self.__request_new_shard_if_possible()
 
@@ -394,6 +397,6 @@ class Connection:
 
 		print(f"[+] Handshake complete with {self.p_peer_id}: {self.ip}:{self.port}")
 		#threading.Thread(target=self.__peer_listen, args=()).start()
-		#threading.Thread(target=self.__peer_keepalive, args=()).start()
+		threading.Thread(target=self.__peer_keepalive, args=()).start()
 
 
