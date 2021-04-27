@@ -27,9 +27,8 @@ if __name__ == "__main__" :
 			'choices': choices
 		}
 	]
-	#answers = prompt(questions)
-	#p = answers['peer']
-	p = random.choice(t.peers)
+	answers = prompt(questions)
+	p = answers['peer']
 	print(t)
 
 	# using this endpoint because I don't want the hassle of
