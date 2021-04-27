@@ -1,28 +1,5 @@
+import binascii, hashlib, ipaddress, os, requests, socket, struct
 from bdecode import bdecode
-
-# old
-import hashlib
-import ipaddress
-import struct
-import socket
-import hexdump
-import binascii
-import requests
-import os
-import binascii
-import json
-import threading
-import time
-import struct
-import math
-import hashlib
-from progress.bar import Bar
-
-# taken from https://wiki.theory.org/Decoding_bencoded_data_with_python
-# fixed to work with python3 bytearrays
-# could precompute ords but this is more readable
-
-
 
 class Torrent:
 	def __init__(self,torrent_file):
@@ -36,12 +13,14 @@ class Torrent:
 		self.info_hash = self.torrent['info_hash']
 		self.piece_length = self.torrent['info']['piece length']
 		self.__load_piece_hashes(self.torrent['info']['pieces'])
+		# some torrent files don't include this attribute. Could be calculated,
+		# but I have no interest in developing this tool oustide of a proof of concept
 		self.length = self.torrent['info']['length']
-
 		self.__get_peers()
 
+
 	def __str__(self):
-		# TODO workng with single file torrent only for now
+		# TODO working with single file torrents only for now
 		"""
 		{
 			"announce": "https://torrent.ubuntu.com/announce", 
@@ -71,6 +50,7 @@ class Torrent:
 		s += f"piece length: {self.torrent['info']['piece length']}\n"
 		s += f"info hash: {binascii.hexlify(self.torrent['info_hash']).decode('utf-8')}"
 		return s
+
 
 	def __get_peers(self):
 		# request list of peers from tracker
@@ -118,7 +98,9 @@ class Torrent:
 		stopped: 
 			Must be sent to the tracker if the client is shutting down gracefully.
 		completed: 
-			Must be sent to the tracker when the download completes. However, must not be sent if the download was already 100% complete when the client started. Presumably, this is to allow the tracker to increment the "completed downloads" metric based solely on this event.
+			Must be sent to the tracker when the download completes. However, must not be sent if the download was already
+			100% complete when the client started. Presumably, this is to allow the tracker to increment the "completed
+			downloads" metric based solely on this event.
 		ip: 
 			Optional. The true IP address of the client machine, in dotted quad format or rfc3513 defined hexed IPv6 
 			address. Notes: In general this parameter is not necessary as the address of the client can be determined 
@@ -161,6 +143,7 @@ class Torrent:
 		tracker_response = bdecode(r.text)
 		self.peers = self.__parse_peers(tracker_response['peers'])
 
+
 	def __load_piece_hashes(self, piece_hashes_concat):
 		for i in range(0, int(len(piece_hashes_concat)), 20):
 			# these are strings from the bdecoding, convert
@@ -169,17 +152,49 @@ class Torrent:
 			piece_hash_bytes.extend(map(ord, piece_hash))
 			self.piece_hashes.append(bytes(piece_hash_bytes))
 
+
 	def __load_torrent_file(self, torrent_file):
 		with open(torrent_file, 'rb') as f:
 			data = f.read()
 
 		torrent = self.__parse_torrent_file(data)
 
+
 	def __parse_torrent_file(self, data):
 		chunks = bytearray(data)
 		chunks.reverse()
 		root = self.__torrent_dechunk(chunks)
 		self.torrent = root
+
+
+	def __parse_peers(self, peers):
+		if type(peers) == dict:
+			"""
+			peers: (dictionary model) The value is a list of dictionaries, each with the following keys:
+				peer id: peer's self-selected ID, as described above for the tracker request (string)
+				ip: peer's IP address either IPv6 (hexed) or IPv4 (dotted quad) or DNS name (string)
+				port: peer's port number (integer)
+			"""
+			# Nothing needs to happen here.
+			# recursive bdecoding will handle it
+			return peers
+		else:
+			"""
+			peers: (binary model) Instead of using the dictionary model described above, 
+			the peers value may be a string consisting of multiples of 6 bytes. 
+			First 4 bytes are the IP address and last 2 bytes are the port number. 
+			All in network (big endian) notation.
+			"""
+			peers_list = []
+			for i in range(0, int(len(peers)), 6):
+				b = bytearray()
+				b.extend(map(ord,peers[i:i+6]))
+				ip, port = struct.unpack('!IH',b)
+				ip = str(ipaddress.ip_address(ip))
+				peers_list.append({'ip':ip,'port':port})
+			return peers_list
+
+		raise Exception("Couldn't decode peers")
 
 
 	def __torrent_dechunk(self, chunks):
@@ -233,36 +248,5 @@ class Torrent:
 			return line
 		else:
 			raise Exception("Invalid input!")
-
-
-	def __parse_peers(self, peers):
-		# untested, attempt to discern between the two models
-		if type(peers) == dict:
-			"""
-			peers: (dictionary model) The value is a list of dictionaries, each with the following keys:
-				peer id: peer's self-selected ID, as described above for the tracker request (string)
-				ip: peer's IP address either IPv6 (hexed) or IPv4 (dotted quad) or DNS name (string)
-				port: peer's port number (integer)
-			"""
-			# Nothing needs to happen here.
-			# recursive bdecoding will handle it
-			return peers
-		else:
-			"""
-			peers: (binary model) Instead of using the dictionary model described above, 
-			the peers value may be a string consisting of multiples of 6 bytes. 
-			First 4 bytes are the IP address and last 2 bytes are the port number. 
-			All in network (big endian) notation.
-			"""
-			peers_list = []
-			for i in range(0, int(len(peers)), 6):
-				b = bytearray()
-				b.extend(map(ord,peers[i:i+6]))
-				ip, port = struct.unpack('!IH',b)
-				ip = str(ipaddress.ip_address(ip))
-				peers_list.append({'ip':ip,'port':port})
-			return peers_list
-
-		raise Exception("Couldn't decode peers")
 
 	

@@ -1,3 +1,7 @@
+# taken from https://wiki.theory.org/Decoding_bencoded_data_with_python
+# fixed to work with python3 bytearrays
+# could precompute ords but this is more readable
+
 def bdecode(data):
 	# try to be nice and work on strings too
 	# done this way to prevent encoding/decoding issues

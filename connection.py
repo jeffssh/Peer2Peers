@@ -1,26 +1,5 @@
-from bdecode import bdecode
-# old
-import hashlib
-import ipaddress
-import struct
-import socket
-import hexdump
-import binascii
-import requests
-import os
-import binascii
-import json
-import threading
-import time
-import struct
-import math
-import hashlib
+import hashlib, json, math, requests, socket, struct, time
 from progress.bar import Bar
-
-# taken from https://wiki.theory.org/Decoding_bencoded_data_with_python
-# fixed to work with python3 bytearrays
-# could precompute ords but this is more readable
-
 
 class Connection:
 	"""
@@ -40,41 +19,58 @@ class Connection:
 	peer_interested = 0
 	"""
 	def __init__(self, torrent, ip, port):
-		self.unfullfilled_shard_requests = 0
-		
-		# old
+		self.ip = ip
+		self.port = port
 		self.torrent = torrent
 		self.info_hash = torrent.info_hash
 		self.peer_id = torrent.peer_id
 		self.piece_hashes = torrent.piece_hashes
-		self.ip = ip
-		self.port = port
+		
+		# Peer connection state, we are always interested
 		self.am_choking = True
 		self.peer_choking = True
 		self.peer_interested = False
-		self.bitfield = [False] * len(self.piece_hashes)
-		self.pstr = b'BitTorrent protocol'
+		# socket
 		self.s = None
+		# protocol string
+		self.pstr = b'BitTorrent protocol'
+		# "bitfield" to track pieces we've downloaded
+		self.bitfield = [False] * len(self.piece_hashes)
+		# list to rebuild pieces as they are being requested.
+		self.partial_pieces = [None] * len(self.piece_hashes)
+		# shards are pieces of pieces
+		self.shards_per_piece = 0
+		self.shards_per_last_piece = 0
+		# number of requested shards that have not been replied to
+		self.outstanding_shards = 0
+		# maximum number of shards to request per connection
+		self.outstanding_shards_max = 20
+		# shard size 
+		self.shard_size = 1<<14
+		# field of dicts representing shard attributes, including
+		# whether or not one has been requested, piece indices, and
+		# offsets within pieces
+		self.shardfield = self.__create_shardfield()
+		# a tracker for how many shard requests have failed.
+		# once all shard requests have failed, the torrent
+		# will be checked for completeness
+		self.unfullfilled_shard_requests = 0
+		# progress bar
+		self.progress_bar = None
+
+		# peer fields
 		self.p_reserved = None
 		self.p_info_hash = None
 		self.p_peer_id = None
 		self.p_bitfield = [False] * len(self.piece_hashes)
-		self.outstanding_shards_max = 20
-		self.outstanding_shards = 0
-		self.shard_lock = threading.Lock()
-		self.send_lock = threading.Lock()
-		self.shard_size = 1<<14
-		self.shards_per_piece = 0
-		self.shards_per_last_piece = 0
-		self.progress_bar = None
-		self.shardfield = self.__create_shardfield()
-		self.partial_pieces = [None] * len(self.piece_hashes)
-		self.unfullfilled_shard_requests = 0
 
+	
+	# socket helpers
 	def __create_socket(self):
 		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		s.connect((self.ip, self.port))
 		self.s = s
+
 
 	def __recv_full(self, num_bytes):
 		message = b""
@@ -84,48 +80,53 @@ class Connection:
 				message += self.s.recv(num_bytes - read)
 				read = len(message)
 			except Exception as e:
+				print(e)
 				self.s.close()
 				raise Exception("Couldn't recv message from peer")
 		return message
 
+
 	def __send_full(self, message):
 		num_bytes = len(message)
 		sent = 0
-		self.send_lock.acquire()
 		while sent != num_bytes:
 			try: 
 				sent += self.s.send(message[sent:])
 			except Exception as e:
+				print(e)
 				self.s.close()
-				self.send_lock.release()
 				raise Exception("Couldn't send message to peer")
-		self.send_lock.release()
 		return sent == len(message)
 
-	def __peer_keepalive(self):
-		while True:
-			time.sleep(30)
-			self.__send_full(b"\x00\x00\x00\x00")
 
 	def __send_message(self, message):
 		length = struct.pack(">I", 1)
 		self.__send_full(length + message)
 
+	
+	def __peer_keepalive(self):
+		while True:
+			time.sleep(30)
+			self.__send_full(b"\x00\x00\x00\x00")
+
+
+	# shard helpers
 	def __create_shardfield(self):
 		# shardfield is a bitfield broken down into a
-		# collection of maps representing shard
-		#print("================ shardfield")
+		# collection of dicts representing shards
 		num_pieces = len(self.piece_hashes)
 		num_normal_pieces = (num_pieces - 1)
 		shards = []
-		#print(f"num_normal_shards: {self.torrent.piece_length / self.shard_size}, {math.floor(self.torrent.piece_length / self.shard_size)}")
+		# calculate number of shards per piece
 		num_normal_shards = math.floor(self.torrent.piece_length / self.shard_size)
 		last_shard_in_piece_length = self.torrent.piece_length % self.shard_size	
-		#print(f"last_shard_in_piece_length: {last_shard_in_piece_length}")
 		self.shards_per_piece = num_normal_shards
+		# if there was a remainder
 		if last_shard_in_piece_length:
 			self.shards_per_piece += 1
 
+		# create shard list for each piece, ensuring last shard is handled
+		# correctly if it is shorter
 		for i in range(num_normal_pieces):
 			curr_shards = []
 			begin = 0
@@ -140,10 +141,8 @@ class Connection:
 		# do same calculations but for very last piece, which can be shorter than other
 		# pieces
 		last_piece_length = self.torrent.length % self.torrent.piece_length
-		#print(f"num_last_normal_shards: {math.floor(last_piece_length/self.shard_size)}, {math.floor(last_piece_length/self.shard_size)}")
 		num_last_normal_shards = math.floor(last_piece_length/self.shard_size)
 		last_shard_length = last_piece_length % self.shard_size
-		#print(f"last_shard_length: {last_shard_length}")
 		self.shards_per_last_piece = num_last_normal_shards
 		if last_shard_length:
 			self.shards_per_last_piece += 1
@@ -156,11 +155,15 @@ class Connection:
 			curr_shards.append({"index": i, "begin": begin, "length": last_shard_length, "requested": False})
 	
 		shards += curr_shards 
-		#print(f"made shardfield of size {len(shards)}, shards per piece: {self.shards_per_piece}, shards per last piece: {self.shards_per_last_piece}",)
-		#print("================ shardfield")
 		return shards
 
+
 	def __get_next_downloadable_shard(self):
+		# look for a shard that hasn't been requested yet. If
+		# all have been requested, return None.
+		# Other functions are responsible for resetting the
+		# shardfield state, this function will pick up earlier
+		# shards that failed and were reset
 		for i in range(len(self.p_bitfield)):
 			if self.p_bitfield[i]:
 				shards_per_piece = self.shards_per_piece
@@ -172,27 +175,6 @@ class Connection:
 					if not s["requested"]:
 						return s
 		return None
-	
-
-	def __request_new_shard_if_possible(self):
-		# <len=0013><id=6><index><begin><length>
-		#num_to_request = self.outstanding_pieces - self.outstanding_piece_max:
-		shard = self.__get_next_downloadable_shard()
-		if not shard:
-			# no more shards that can be downloaded.
-			# either we're finished, or this peer can't
-			# give us the whole file now
-			self.unfullfilled_shard_requests += 1
-		else:
-			message = b"\x06"
-			message += struct.pack(">I", shard["index"])
-			message += struct.pack(">I", shard["begin"])
-			message += struct.pack(">I", shard["length"])
-			#print(f"sending shard request - index: {shard['index']}, begin: {shard['begin']}, length:{shard['length']}")
-			self.__send_message(message)
-			shard["requested"] = True
-			self.outstanding_shards += 1
-
 
 
 	def __process_incoming_shard(self, index,begin,block):
@@ -240,18 +222,39 @@ class Connection:
 			# If we've downloaded all the pieces, the peer owns the file
 			# if not, they can't serve the whole file to us at this moment.
 			# for a proof of concept tool, os._kill is fine
-			print("bitfield count", self.bitfield.count(True), "piece_hashes length", len(self.piece_hashes), "equal?", self.bitfield.count(True) == len(self.piece_hashes))
 			if self.bitfield.count(True) == len(self.piece_hashes):
 				print("[+] This peer owns the whole file!")
-				#os._kill(0)
+				os._kill(0)
 			else:
 				print("[-] Peer couldn't serve whole file")
-				#os._kill(0)
+				os._kill(0)
 
 
+	def __request_new_shard_if_possible(self):
+		shard = self.__get_next_downloadable_shard()
+		if not shard:
+			# no more shards that can be downloaded.
+			# either we're finished, or this peer can't
+			# give us the whole file now
+			self.unfullfilled_shard_requests += 1
+		else:
+			# <len=0013><id=6><index><begin><length>
+			message = b"\x06"
+			message += struct.pack(">I", shard["index"])
+			message += struct.pack(">I", shard["begin"])
+			message += struct.pack(">I", shard["length"])
+			self.__send_message(message)
+			shard["requested"] = True
+			self.outstanding_shards += 1
+
+
+	# recv loop - If this program was to be multithreaded,
+	# this would be split up into a reader and writer loop
+	# rather than just dispatching requests on a message recv
 	def __recv_loop(self):
 		while True:
 			try:
+				# recv torrent messages
 				# <length prefix><message ID><payload>.
 				length = self.__recv_full(4)
 				length = struct.unpack(">I", length)[0]
@@ -287,6 +290,7 @@ class Connection:
 						self.p_bitfield = [True] * num_pieces
 						self.interested = True
 					else:
+						# parse bitfield and initialize list
 						bitfield = []
 						pieces = 0
 						for b in message:
@@ -330,7 +334,11 @@ class Connection:
 					print(f"unrecognized message id: {message_id}")
 				
 			except Exception as e:
+				# general exception handling is bad, but fine for this proof of
+				# concept
+				print(e)
 				self.s.close()
+
 				raise Exception("Connection to peer was closed")
 			
 			if self.peer_choking:
@@ -348,30 +356,13 @@ class Connection:
 		# but send one anyway to prompt the peer to unchoke
 		
 		# send bitfield message, letting peer know we have none of the pieces
-		#empty_bitfield = b"\x05"+ math.ceil(len(self.piece_hashes)/8) * b"\x00"
-		#self.__send_message(empty_bitfield)
+		empty_bitfield = b"\x05"+ math.ceil(len(self.piece_hashes)/8) * b"\x00"
+		self.__send_message(empty_bitfield)
+		
 		# send interested message
 		self.__send_message(b"\x02")
 		self.__recv_loop()
 		return
-
-		while True:
-			# wait for peer to unchoke. They'll either unchoke or kill the connection
-			if not self.peer_choking:
-				# can download
-				# start progress bar printing
-				self.progress_bar = Bar('Downloading and verifying pieces', max=len(self.piece_hashes))
-				self.__unchoked_do_download()
-
-				return
-			else:
-				# can't download
-				print("[*] Peer choking, waiting 3 seconds then resending interested message")
-				self.__send_message(b"\x02")
-				time.sleep(3)
-		
-
-		
 
 
 	def do_handshake(self):
@@ -396,7 +387,7 @@ class Connection:
 			raise Exception("Client and Peer info_hash mismatch")
 
 		print(f"[+] Handshake complete with {self.p_peer_id}: {self.ip}:{self.port}")
-		#threading.Thread(target=self.__peer_listen, args=()).start()
-		threading.Thread(target=self.__peer_keepalive, args=()).start()
+		# could start a keepalive thread here if interested
+		#threading.Thread(target=self.__peer_keepalive, args=()).start()
 
 
